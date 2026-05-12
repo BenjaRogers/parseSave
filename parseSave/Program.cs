@@ -1,10 +1,7 @@
-﻿using Newtonsoft.Json.Linq;
-using System.Collections;
-using System.Formats.Nrbf;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Security.Claims;
-using System.Runtime.Serialization.Formatters.Binary;
+﻿using System.Formats.Nrbf;
+using System.Text.Json;
+using MessagePack;
+
 public class Program
 {
 
@@ -16,6 +13,129 @@ public class Program
             //Console.WriteLine($"\t {name,-20} | Type: {classRecord.RecordType} ({classRecord.TypeName})");
         }
     }
+
+    public static Dictionary<string, object> ParseDict(ClassRecord classRecord)
+    {
+        Dictionary<string, object> parseDict = new Dictionary<string, object>();
+        foreach (string memberName in classRecord.MemberNames)
+        {
+            object? value = classRecord.GetRawValue(memberName);
+            if (value is null)
+            {
+                parseDict[memberName] = null;
+                Console.WriteLine($"{memberName} is null");
+            }
+
+            if (value is SerializationRecord record)
+            {
+                if (record is ClassRecord crecord)
+                {
+                    Dictionary<string, object> newDict = ParseDict(crecord);
+                    parseDict[memberName] = newDict;
+                }
+
+                if (record is ArrayRecord arrayRecord)
+                {
+                    if (arrayRecord.RecordType == SerializationRecordType.ArraySinglePrimitive)
+                    {
+                        int count = arrayRecord.Lengths[0];
+                        bool isInt = true;
+                        bool isFloat = true;
+                        // Console.WriteLine(count);
+                        try
+                        {
+                            int c = 0;
+                            var primArray = arrayRecord.GetArray(typeof(int[]));
+                            // foreach (int i in primArray)
+                            // {
+                            //     Console.WriteLine($"{c.ToString()} {i.ToString()}");
+                            //     c++;
+                            // }
+                            parseDict[memberName] = primArray;
+                        }
+                        catch
+                        {
+                            isInt = false;
+                            //Console.WriteLine("Not int");
+                        }
+
+                        try
+                        {
+                            int c = 0;
+                            var primArray = arrayRecord.GetArray(typeof(float[]));
+                            // foreach (float i in primArray)
+                            // {
+                            //     Console.WriteLine($"{c.ToString()} {i.ToString()}");   
+                            //     c++;
+                            // }
+                            parseDict[memberName] = primArray;
+                        }
+                        catch
+                        {
+                            isFloat = false;
+                            // Console.WriteLine("Not float");
+                        }
+                        
+                        if (!isInt && !isFloat)
+                        { 
+                            parseDict[memberName] = "not int or float";
+                            try 
+                            {
+                                var primArray = arrayRecord.GetArray(typeof(byte[]));
+                            }
+                            catch
+                            {
+                                Console.WriteLine($"Not byte");
+                            }
+                            Console.WriteLine($"{memberName} not int or float");
+                        }
+                    }
+                    if (arrayRecord.RecordType == SerializationRecordType.BinaryArray)
+                    {
+                        if (arrayRecord is SZArrayRecord<SerializationRecord> szArray)
+                        {
+                            Dictionary<string, object>[] arr = new Dictionary<string, object>[szArray.Length];
+                            for (int i = 0; i < szArray.Length; i++)
+                            {
+                                SerializationRecord? r = szArray.GetArray()[i];
+                                if (r is ClassRecord c)
+                                {
+                                    arr[i] = ParseDict(c);
+
+                                }
+                                else if (r is not null)
+                                {
+                                    parseDict[memberName] = "Not classrecord";
+                                    // Console.WriteLine("not classrecord.");
+                                }
+                                else
+                                {
+                                    parseDict[memberName] = null;
+                                    Console.WriteLine($"{memberName} is else");
+                                }
+                                // Console.WriteLine("BinaryArray");
+                            }
+                            parseDict[memberName] = arr;
+
+                        }
+                    }
+                }
+            }
+            else if (value is not null)
+            {
+                //Console.WriteLine($"{memberName}, {value}");
+                parseDict[memberName] = value;
+            }
+
+            else
+            {
+                parseDict[memberName] = null;
+                Console.WriteLine($"{memberName}, else");
+            }
+        }
+        return parseDict;
+    }
+
     public static void Parse(ClassRecord classRecord, StreamWriter file, int depth)
     {
         string s = "";
@@ -26,17 +146,17 @@ public class Program
         s += $"Class Name: {classRecord.TypeName}";
         //file.WriteLine(s);
         //file.WriteLine("--- Field Names Found ---");
-        
+
         foreach (string memberName in classRecord.MemberNames)
         {
-            
+
             object? value = classRecord.GetRawValue(memberName);
             if (value is SerializationRecord record)
             {
                 // It's a complex type (Class, Array, etc.)
                 s = "";
                 for (int i = 0; i < depth; i++)
-                { 
+                {
                     s += "\t";
                 }
                 s += $"Field: {memberName,-20} | Type: {record.RecordType}";
@@ -107,7 +227,7 @@ public class Program
                         }
                         catch
                         {
-                           // Console.WriteLine("not single");
+                            // Console.WriteLine("not single");
                         }
                     }
                     if (arrayRecord.RecordType == SerializationRecordType.BinaryArray)
@@ -144,7 +264,7 @@ public class Program
                                     //    Console.WriteLine($"  {m}: {v}");
                                     //}
                                 }
-                                else if (r is not null) 
+                                else if (r is not null)
                                 {
                                     file.WriteLine("not classrecord.");
                                 }
@@ -171,14 +291,12 @@ public class Program
             }
         }
     }
-    
+
     public static void Main()
     {
-        //#pragma warning disable SYSLIB0011
-        //var bf = new BinaryFormatter();
-        //using FileStream fs = File.OpenRead("../../../../slot0.save");
-        //bf.Deserialize(fs);
         List<string> members = new List<string>();
+        Dictionary<string, object> parsedDict = new Dictionary<string, object>();
+
 
         using FileStream fs = File.OpenRead("../../../../slot0.save");
         using StreamWriter wText = new StreamWriter("File.txt");
@@ -186,102 +304,13 @@ public class Program
 
         if (rootRecord is ClassRecord classRecord)
         {
-            //foreach (string memberName in classRecord.MemberNames)
-            //{
-
-            //    object? value = classRecord.GetRawValue(memberName);
-            //    if (value is not SerializationRecord record)
-            //    {
-            //        Console.WriteLine(memberName);
-            //    }
-            //}
-            Parse(classRecord, wText, 0);
-            //Console.WriteLine($"Class Name: {classRecord.TypeName}");
-            //Console.WriteLine("--- Field Names Found ---");
-
-            //foreach (string memberName in classRecord.MemberNames)
-            //{
-            //    object? value = classRecord.GetRawValue(memberName);
-
-
-            //    if (value is SerializationRecord record)
-            //    {
-            //        // It's a complex type (Class, Array, etc.)
-            //        Console.WriteLine($"Field: {memberName,-20} | Type: {record.RecordType} ({record.TypeName})");
-            //        if (record is ClassRecord crecord)
-            //        {
-            //            ParseClassRecord(crecord);
-            //        }
-
-            //        if (record is ArrayRecord arrayRecord)
-            //        {
-            //            if (arrayRecord.RecordType == SerializationRecordType.ArraySinglePrimitive)
-            //            {
-            //                int count = arrayRecord.Lengths[0];
-            //                Console.WriteLine(count);
-            //                try
-            //                {
-            //                    var primArray = arrayRecord.GetArray(typeof(int[]));
-            //                    foreach (int i in primArray)
-            //                    {
-            //                        Console.WriteLine(i);
-            //                    }
-            //                }
-            //                catch
-            //                {
-            //                    Console.WriteLine("Not int");
-            //                }
-            //                try
-            //                {
-            //                    var primArray = arrayRecord.GetArray(typeof(Single[]));
-            //                    foreach (Single i in primArray)
-            //                    {
-            //                        Console.WriteLine(i);
-            //                    }
-            //                } catch
-            //                {
-            //                    Console.WriteLine("not single");
-            //                }
-            //            }
-            //            if (arrayRecord.RecordType == SerializationRecordType.BinaryArray)
-            //            {
-            //                int count = arrayRecord.Lengths[0];
-            //                Console.WriteLine(count);
-
-            //                var t = arrayRecord.TypeName.FullName;
-            //                if (arrayRecord is SZArrayRecord<SerializationRecord> szArray)
-            //                {
-            //                    // Use a standard for loop. 
-            //                    // This bypasses the iterable/GetArray type-checking errors.
-            //                    for (int i = 0; i < szArray.Length; i++)
-            //                    {
-            //                        // Access each element individually as a record
-            //                        SerializationRecord r = szArray.GetArray()[i];
-
-            //                        if (r is ClassRecord c)
-            //                        {
-            //                            Console.WriteLine($"Mission Record [{i}]: {classRecord.TypeName.FullName}");
-
-            //                            // Extract values by name from the proxy object
-            //                            foreach (string m in c.MemberNames)
-            //                            {
-            //                                object v = c.GetRawValue(m);
-            //                                Console.WriteLine($"  {m}: {v}");
-            //                            }
-            //                        }
-            //                    }
-            //                }
-
-
-            //            }
-            //        }
-            //    }
-            //    else if (value is not null)
-            //    {
-            //        // It's a direct primitive (int, float, string, etc.)
-            //        Console.WriteLine($"Field: {memberName,-20} | Type: {value.GetType().FullName} | Value: {value}");
-            //    }
-            //}
+            //Parse(classRecord, wText, 0);   
+            Dictionary<string, object> rootDict = ParseDict(classRecord);
+            string jsonString = JsonSerializer.Serialize(rootDict);
+            File.WriteAllText("dictionary.json", jsonString);
         }
+
+
+
     }
 }
