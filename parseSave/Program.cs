@@ -1,6 +1,7 @@
 ﻿using System.Formats.Nrbf;
 using System.Text.Json;
 using MessagePack;
+using MessagePack.Resolvers;
 
 public class Program
 {
@@ -26,7 +27,7 @@ public class Program
                 Console.WriteLine($"{memberName} is null");
             }
 
-            if (value is SerializationRecord record)
+            else if (value is SerializationRecord record)
             {
                 if (record is ClassRecord crecord)
                 {
@@ -34,69 +35,89 @@ public class Program
                     parseDict[memberName] = newDict;
                 }
 
+                // ARRAYS
                 if (record is ArrayRecord arrayRecord)
                 {
+
+                    // PRIMATIVE ARRAY HANDLING
                     if (arrayRecord.RecordType == SerializationRecordType.ArraySinglePrimitive)
                     {
                         int count = arrayRecord.Lengths[0];
                         bool isInt = true;
                         bool isFloat = true;
                         // Console.WriteLine(count);
-                        try
-                        {
-                            int c = 0;
-                            var primArray = arrayRecord.GetArray(typeof(int[]));
-                            // foreach (int i in primArray)
-                            // {
-                            //     Console.WriteLine($"{c.ToString()} {i.ToString()}");
-                            //     c++;
-                            // }
-                            parseDict[memberName] = primArray;
-                        }
-                        catch
-                        {
-                            isInt = false;
-                            //Console.WriteLine("Not int");
-                        }
 
-                        try
+                        if (arrayRecord.TypeNameMatches(typeof(int[])))
                         {
-                            int c = 0;
-                            var primArray = arrayRecord.GetArray(typeof(float[]));
-                            // foreach (float i in primArray)
-                            // {
-                            //     Console.WriteLine($"{c.ToString()} {i.ToString()}");   
-                            //     c++;
-                            // }
-                            parseDict[memberName] = primArray;
-                        }
-                        catch
-                        {
-                            isFloat = false;
-                            // Console.WriteLine("Not float");
-                        }
-                        
-                        if (!isInt && !isFloat)
-                        { 
-                            parseDict[memberName] = "not int or float";
-                            try 
+                            try
                             {
-                                var primArray = arrayRecord.GetArray(typeof(byte[]));
+                                var primArray = arrayRecord.GetArray(typeof(int[]));
+                                parseDict[memberName] = primArray;
                             }
                             catch
                             {
-                                Console.WriteLine($"Not byte");
+                                isInt = false;
+                                Console.WriteLine($"{memberName} - Not int");
                             }
-                            Console.WriteLine($"{memberName} not int or float");
+                        }
+                        
+                        else if (arrayRecord.TypeNameMatches(typeof(float[])))
+                        {
+                            try
+                            {
+                                
+                                var primArray = arrayRecord.GetArray(typeof(float[]));
+                                parseDict[memberName] = primArray;
+                            }
+                            catch
+                            {
+                                Console.WriteLine($"{memberName} - Not float");
+                            }
+                        }
+                        
+                        else if (arrayRecord.TypeNameMatches(typeof(byte[])))
+                        {
+                            try 
+                            {
+                                var primArray = arrayRecord.GetArray(typeof(byte[]));
+                                parseDict[memberName] = primArray;
+                            }
+                            catch
+                            {
+                                Console.WriteLine($"{memberName} - Not byte");
+                            }
+                        }
+                        else if (arrayRecord.TypeNameMatches(typeof(bool[]))) {
+                            try
+                            {
+                                var primArray = arrayRecord.GetArray(typeof(bool[]));
+                                parseDict[memberName] = primArray;
+                            }
+                            catch
+                            {
+                                Console.WriteLine($"{memberName} - Not bool");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("${memberName} - Check type");
                         }
                     }
+
+                    // BINARY ARRAY
                     if (arrayRecord.RecordType == SerializationRecordType.BinaryArray)
                     {
+                        if (memberName == "_items")
+                        {
+                            
+                        }
                         if (arrayRecord is SZArrayRecord<SerializationRecord> szArray)
                         {
                             Dictionary<string, object>[] arr = new Dictionary<string, object>[szArray.Length];
                             for (int i = 0; i < szArray.Length; i++)
                             {
+                                
+
                                 SerializationRecord? r = szArray.GetArray()[i];
                                 if (r is ClassRecord c)
                                 {
@@ -294,23 +315,47 @@ public class Program
 
     public static void Main()
     {
-        List<string> members = new List<string>();
         Dictionary<string, object> parsedDict = new Dictionary<string, object>();
 
+        // Read Save file to memory & decode w/ NRBF
+        using (FileStream fs = File.OpenRead("../../../../slot0.save")){
+            SerializationRecord rootRecord = NrbfDecoder.Decode(fs, out var recordMap);
+            // Console.WriteLine(recordMap["1"]);
+            if (rootRecord is ArrayRecord)
+            {
+                Console.WriteLine(rootRecord.GetType());
+            }
+            // Parse to dictionary object
+            if (rootRecord is ClassRecord classRecord)
+            {
+                Dictionary<string, object> rootDict = ParseDict(classRecord);
 
-        using FileStream fs = File.OpenRead("../../../../slot0.save");
-        using StreamWriter wText = new StreamWriter("File.txt");
-        SerializationRecord rootRecord = NrbfDecoder.Decode(fs);
+                // // Write human readable json file
+                // string jsonString = JsonSerializer.Serialize(rootDict);
+                // File.WriteAllText("dictionary.json", jsonString);
 
-        if (rootRecord is ClassRecord classRecord)
-        {
-            //Parse(classRecord, wText, 0);   
-            Dictionary<string, object> rootDict = ParseDict(classRecord);
-            string jsonString = JsonSerializer.Serialize(rootDict);
-            File.WriteAllText("dictionary.json", jsonString);
+                // Encode back to binary
+                var options = MessagePackSerializerOptions.Standard.WithResolver(ContractlessStandardResolver.Instance);
+                byte[] binaryData = MessagePackSerializer.Serialize(rootDict, options);
+                
+                byte[] orig = File.ReadAllBytes("../../../../slot0.save")[0..binaryData.Length];
+            
+                if (binaryData == orig)
+                {
+                    Console.WriteLine("SAME");
+                }
+                else
+                {
+                    Console.WriteLine($"{orig.Length} - {binaryData.Length}");
+                }   
+            }
         }
+        
+        
+        
+        byte[] fileBytes = File.ReadAllBytes("../../../../slot0.save");
+        
 
-
-
+        
     }
 }
